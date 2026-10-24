@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Chat de la clase</title>
+
+<style>
+
+body{
+font-family: Arial;
+background: linear-gradient(135deg,#6a11cb,#2575fc);
+height:100vh;
+display:flex;
+justify-content:center;
+align-items:center;
+margin:0;
+}
+
+#chat{
+width:420px;
+background:white;
+border-radius:15px;
+box-shadow:0 10px 30px rgba(0,0,0,0.2);
+display:flex;
+flex-direction:column;
+overflow:hidden;
+}
+
+#header{
+background:#2575fc;
+color:white;
+padding:15px;
+font-size:18px;
+}
+
+#mensajes{
+flex:1;
+padding:15px;
+overflow-y:auto;
+background:#f4f6fb;
+}
+
+.mensaje{
+display:flex;
+margin-bottom:10px;
+}
+
+.avatar{
+width:35px;
+height:35px;
+border-radius:50%;
+background:#2575fc;
+color:white;
+display:flex;
+align-items:center;
+justify-content:center;
+margin-right:10px;
+font-weight:bold;
+}
+
+.burbuja{
+background:white;
+padding:8px 12px;
+border-radius:10px;
+box-shadow:0 2px 5px rgba(0,0,0,0.1);
+max-width:250px;
+}
+
+.nombre{
+font-size:12px;
+font-weight:bold;
+color:#555;
+}
+
+.hora{
+font-size:10px;
+color:#999;
+margin-left:5px;
+}
+
+#input-area{
+display:flex;
+padding:10px;
+border-top:1px solid #ddd;
+}
+
+#mensaje{
+flex:1;
+padding:8px;
+border-radius:8px;
+border:1px solid #ccc;
+}
+
+button{
+margin-left:5px;
+padding:8px 15px;
+border:none;
+background:#2575fc;
+color:white;
+border-radius:8px;
+cursor:pointer;
+}
+
+button:hover{
+background:#1b5fd1;
+}
+
+#aviso{
+display:none;
+background:#ffe9e9;
+color:#b00020;
+font-size:13px;
+padding:6px 12px;
+}
+
+#mensajes{
+height:360px;
+}
+
+button:disabled{
+opacity:.6;
+cursor:not-allowed;
+}
+
+#nombre{
+border:none;
+border-bottom:1px solid #ccc;
+padding:8px;
+width:100%;
+}
+
+</style>
+</head>
+
+<body>
+
+<div id="chat">
+
+<div id="header">
+💬 Chat de la clase
+</div>
+
+<input id="nombre" placeholder="Tu nombre" maxlength="30">
+
+<div id="aviso"></div>
+
+<div id="mensajes"></div>
+
+<div id="input-area">
+<input id="mensaje" placeholder="Escribe un mensaje" maxlength="500">
+<button id="enviar">Enviar</button>
+</div>
+
+</div>
+
+<script>
+
+// Mismo origen por defecto: funciona igual en Azure, AWS, Render o local.
+// Si el frontend está en otro host, define window.CHAT_API_URL antes de este script.
+const API = window.CHAT_API_URL || "";
+
+const contenedor = document.getElementById("mensajes");
+const inputNombre = document.getElementById("nombre");
+const inputMensaje = document.getElementById("mensaje");
+const btnEnviar = document.getElementById("enviar");
+const aviso = document.getElementById("aviso");
+
+let ultimoId = 0;
+let cargando = false;
+
+try { inputNombre.value = localStorage.getItem("chat_nombre") || ""; } catch (e) {}
+
+function mostrarAviso(texto){
+  aviso.textContent = texto || "";
+  aviso.style.display = texto ? "block" : "none";
+}
+
+function agregarMensaje(m){
+  const fila = document.createElement("div");
+  fila.className = "mensaje";
+
+  const avatar = document.createElement("div");
+  avatar.className = "avatar";
+  avatar.textContent = (m.usuario || "?").charAt(0).toUpperCase();
+
+  const burbuja = document.createElement("div");
+  burbuja.className = "burbuja";
+
+  const nombre = document.createElement("div");
+  nombre.className = "nombre";
+  nombre.textContent = m.usuario;
+
+  const hora = document.createElement("span");
+  hora.className = "hora";
+  hora.textContent = new Date(m.fecha).toLocaleTimeString();
+  nombre.appendChild(hora);
+
+  const texto = document.createElement("div");
+  texto.textContent = m.mensaje; // textContent evita inyección de HTML (XSS)
+
+  burbuja.append(nombre, texto);
+  fila.append(avatar, burbuja);
+  contenedor.appendChild(fila);
+}
+
+async function cargarMensajes(){
+  if (cargando) return;
+  cargando = true;
+  try {
+    const res = await fetch(API + "/mensajes?desde=" + ultimoId);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+
+    if (data.length){
+      const abajo = contenedor.scrollHeight - contenedor.scrollTop - contenedor.clientHeight < 60;
+      data.forEach(m => { agregarMensaje(m); ultimoId = Math.max(ultimoId, m.id); });
+      if (abajo) contenedor.scrollTop = contenedor.scrollHeight;
+    }
+    mostrarAviso("");
+  } catch (e) {
+    mostrarAviso("Sin conexión con el servidor. Reintentando…");
+  } finally {
+    cargando = false;
+  }
+}
+
+async function enviar(){
+  const usuario = inputNombre.value.trim();
+  const mensaje = inputMensaje.value.trim();
+
+  if (!usuario){ mostrarAviso("Escribe tu nombre."); inputNombre.focus(); return; }
+  if (!mensaje){ return; }
+
+  btnEnviar.disabled = true;
+  try {
+    const res = await fetch(API + "/mensaje", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ usuario, mensaje })
+    });
+    if (!res.ok){
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || "No se pudo enviar (HTTP " + res.status + ")");
+    }
+    try { localStorage.setItem("chat_nombre", usuario); } catch (e) {}
+    inputMensaje.value = "";
+    mostrarAviso("");
+    await cargarMensajes();
+    contenedor.scrollTop = contenedor.scrollHeight;
+  } catch (e) {
+    mostrarAviso(e.message);
+  } finally {
+    btnEnviar.disabled = false;
+    inputMensaje.focus();
+  }
+}
+
+btnEnviar.addEventListener("click", enviar);
+inputMensaje.addEventListener("keydown", e => { if (e.key === "Enter") enviar(); });
+
+cargarMensajes();
+setInterval(cargarMensajes, 2000);
+
+</script>
+
+</body>
+</html>
